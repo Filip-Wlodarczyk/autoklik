@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-AutoKlik - Prosty auto-kliker dla Linux
-Nagrywa ruchy myszy, kliknięcia, scrollowanie i klawiaturę, a następnie powtarza w pętli.
-ESC - zatrzymuje nagrywanie / odtwarzanie
+AutoKlik - Simple auto-clicker for Linux
+Records mouse, keyboard actions and replays them in an infinite loop.
+ESC - stops recording / playback
 """
 
 import tkinter as tk
@@ -10,151 +10,166 @@ from tkinter import messagebox
 import threading
 import time
 from pynput import mouse, keyboard
-from pynput.mouse import Button, Controller as MouseController
-from pynput.keyboard import Key, KeyCode, Controller as KeyboardController, Listener as KeyListener
+from pynput.mouse import Controller as MouseController
+from pynput.keyboard import Key, Controller as KeyboardController, Listener as KeyListener
+
+
+# ── Colour palette (Catppuccin Mocha) ──────────────
+BG     = "#1e1e2e"
+CARD   = "#313244"
+CARD2  = "#45475a"
+ACCENT = "#cba6f7"
+GREEN  = "#a6e3a1"
+RED    = "#f38ba8"
+YELLOW = "#f9e2af"
+BLUE   = "#89b4fa"
+FG     = "#cdd6f4"
+MUTED  = "#6c7086"
 
 
 class AutoKlik:
     def __init__(self, root):
         self.root = root
-        self.root.title("🖱️ AutoKlik")
-        self.root.geometry("400x520")
+        self.root.title("AutoKlik")
+        self.root.geometry("420x560")
         self.root.resizable(False, False)
-        self.root.configure(bg="#1e1e2e")
+        self.root.configure(bg=BG)
 
-        # Stan aplikacji
+        # State
         self.recording = False
-        self.playing = False
-        self.events = []
+        self.playing   = False
+        self.events    = []
         self.last_event_time = None
         self.loop_count = 0
 
-        # Opcje nagrywania
-        self.record_mouse_var = tk.BooleanVar(value=True)
+        # Options
+        self.record_mouse_var    = tk.BooleanVar(value=True)
         self.record_keyboard_var = tk.BooleanVar(value=True)
 
-        # Listenersy / kontrolery
-        self.record_listener_mouse = None
+        # Listeners / controllers
+        self.record_listener_mouse    = None
         self.record_listener_keyboard = None
-        self.play_thread = None
-        self.global_key_listener = None
+        self.play_thread              = None
+        self.global_key_listener      = None
 
         self.mouse_ctrl = MouseController()
-        self.kbd_ctrl = KeyboardController()
+        self.kbd_ctrl   = KeyboardController()
 
         self._build_ui()
         self._start_global_esc_listener()
 
-    # ──────────────────────────────────────────────
+    # ─────────────────────────────────────────────────
     # UI
-    # ──────────────────────────────────────────────
+    # ─────────────────────────────────────────────────
     def _build_ui(self):
-        BG    = "#1e1e2e"
-        CARD  = "#313244"
-        ACCENT= "#cba6f7"
-        GREEN = "#a6e3a1"
-        RED   = "#f38ba8"
-        YELLOW= "#f9e2af"
-        FG    = "#cdd6f4"
-        MUTED = "#6c7086"
+        # ── Title ──────────────────────────────────
+        tk.Label(self.root, text="🖱️  AutoKlik",
+                 font=("Segoe UI", 22, "bold"), bg=BG, fg=ACCENT).pack(pady=(18, 2))
+        tk.Label(self.root, text="Record & replay mouse and keyboard actions",
+                 font=("Segoe UI", 9), bg=BG, fg=MUTED).pack(pady=(0, 14))
 
-        # ── Tytuł ──
-        tk.Label(self.root, text="🖱️  AutoKlik", font=("Segoe UI", 20, "bold"),
-                 bg=BG, fg=ACCENT).pack(pady=(18, 2))
-        tk.Label(self.root, text="Nagrywaj i powtarzaj akcje myszy i klawiatury",
-                 font=("Segoe UI", 9), bg=BG, fg=MUTED).pack(pady=(0, 12))
+        # ── STEP 1 — Record ────────────────────────
+        self._section("STEP 1 — Record actions")
 
-        # ── Opcje nagrywania ──
-        opt_frame = tk.Frame(self.root, bg=CARD)
-        opt_frame.pack(fill="x", padx=24, pady=(0, 10))
-        tk.Label(opt_frame, text="Nagrywaj:", font=("Segoe UI", 9, "bold"),
-                 bg=CARD, fg=MUTED).pack(side="left", padx=(12, 10), pady=10)
+        opt_frame = self._card()
+        tk.Label(opt_frame, text="Record:", font=("Segoe UI", 9),
+                 bg=CARD, fg=MUTED).pack(side="left", padx=(12, 8), pady=10)
+        chk = dict(bg=CARD, fg=FG, activebackground=CARD, activeforeground=FG,
+                   selectcolor=CARD2, font=("Segoe UI", 10), bd=0, relief="flat")
+        tk.Checkbutton(opt_frame, text="🖱 Mouse",
+                       variable=self.record_mouse_var, **chk).pack(side="left", pady=10)
+        tk.Checkbutton(opt_frame, text="⌨ Keyboard",
+                       variable=self.record_keyboard_var, **chk).pack(side="left", padx=(10, 12), pady=10)
 
-        chk_style = dict(bg=CARD, fg=FG, activebackground=CARD, activeforeground=FG,
-                         selectcolor="#45475a", font=("Segoe UI", 9), bd=0, relief="flat")
-        tk.Checkbutton(opt_frame, text="🖱 Mysz", variable=self.record_mouse_var,
-                       **chk_style).pack(side="left", pady=10)
-        tk.Checkbutton(opt_frame, text="⌨ Klawiatura", variable=self.record_keyboard_var,
-                       **chk_style).pack(side="left", padx=(8, 12), pady=10)
-
-        # ── Karta statusu ──
-        status_frame = tk.Frame(self.root, bg=CARD)
-        status_frame.pack(fill="x", padx=24, pady=(0, 10))
-        tk.Label(status_frame, text="Status:", font=("Segoe UI", 9),
-                 bg=CARD, fg=MUTED).pack(side="left", padx=(12, 4), pady=10)
-        self.status_label = tk.Label(status_frame, text="⏹  Bezczynny",
-                                     font=("Segoe UI", 10, "bold"), bg=CARD, fg=FG)
-        self.status_label.pack(side="left", pady=10)
-
-        # ── Liczniki ──
-        info_frame = tk.Frame(self.root, bg=CARD)
-        info_frame.pack(fill="x", padx=24, pady=(0, 12))
-        tk.Label(info_frame, text="Nagrane akcje:", font=("Segoe UI", 9),
-                 bg=CARD, fg=MUTED).pack(side="left", padx=(12, 4), pady=8)
-        self.events_label = tk.Label(info_frame, text="0",
-                                     font=("Segoe UI", 10, "bold"), bg=CARD, fg=ACCENT)
-        self.events_label.pack(side="left", pady=8)
-        tk.Label(info_frame, text="  |  Pętla #:", font=("Segoe UI", 9),
-                 bg=CARD, fg=MUTED).pack(side="left", pady=8)
-        self.loop_label = tk.Label(info_frame, text="0",
-                                   font=("Segoe UI", 10, "bold"), bg=CARD, fg=GREEN)
-        self.loop_label.pack(side="left", pady=8)
-
-        # ── Ostatni klawisz ──
-        key_frame = tk.Frame(self.root, bg=CARD)
-        key_frame.pack(fill="x", padx=24, pady=(0, 12))
-        tk.Label(key_frame, text="Ostatni klawisz:", font=("Segoe UI", 9),
-                 bg=CARD, fg=MUTED).pack(side="left", padx=(12, 4), pady=8)
-        self.key_label = tk.Label(key_frame, text="—",
-                                  font=("Segoe UI", 10, "bold"), bg=CARD, fg=YELLOW)
-        self.key_label.pack(side="left", pady=8)
-
-        # ── Przycisk NAGRAJ ──
+        # Record button
         self.btn_record = tk.Button(
-            self.root, text="⏺  NAGRAJ", font=("Segoe UI", 13, "bold"),
-            bg=RED, fg="#11111b", activebackground="#f5a0b8", activeforeground="#11111b",
+            self.root, text="⏺  START RECORDING",
+            font=("Segoe UI", 13, "bold"),
+            bg=RED, fg="#11111b",
+            activebackground="#f5a0b8", activeforeground="#11111b",
             relief="flat", bd=0, cursor="hand2", height=2,
             command=self._toggle_record
         )
-        self.btn_record.pack(fill="x", padx=24, pady=(0, 10))
+        self.btn_record.pack(fill="x", padx=24, pady=(6, 4))
 
-        # ── Przycisk START ──
+        # Recording status
+        rec_info = self._card()
+        tk.Label(rec_info, text="Actions recorded:",
+                 font=("Segoe UI", 9), bg=CARD, fg=MUTED).pack(side="left", padx=(12, 4), pady=8)
+        self.events_label = tk.Label(rec_info, text="0",
+                                     font=("Segoe UI", 11, "bold"), bg=CARD, fg=ACCENT)
+        self.events_label.pack(side="left", pady=8)
+        tk.Label(rec_info, text="   Last key:",
+                 font=("Segoe UI", 9), bg=CARD, fg=MUTED).pack(side="left", pady=8)
+        self.key_label = tk.Label(rec_info, text="—",
+                                  font=("Segoe UI", 10, "bold"), bg=CARD, fg=YELLOW)
+        self.key_label.pack(side="left", padx=(4, 12), pady=8)
+
+        # ── STEP 2 — Play ──────────────────────────
+        self._section("STEP 2 — Play back")
+
         self.btn_play = tk.Button(
-            self.root, text="▶  START", font=("Segoe UI", 13, "bold"),
-            bg=GREEN, fg="#11111b", activebackground="#b0f5ab", activeforeground="#11111b",
+            self.root, text="▶  START PLAYBACK",
+            font=("Segoe UI", 13, "bold"),
+            bg=GREEN, fg="#11111b",
+            activebackground="#b0f5ab", activeforeground="#11111b",
             relief="flat", bd=0, cursor="hand2", height=2,
             command=self._toggle_play
         )
-        self.btn_play.pack(fill="x", padx=24, pady=(0, 10))
+        self.btn_play.pack(fill="x", padx=24, pady=(6, 4))
 
-        # ── Przycisk WYCZYŚĆ ──
+        # Playback info
+        play_info = self._card()
+        tk.Label(play_info, text="Loop #:",
+                 font=("Segoe UI", 9), bg=CARD, fg=MUTED).pack(side="left", padx=(12, 4), pady=8)
+        self.loop_label = tk.Label(play_info, text="0",
+                                   font=("Segoe UI", 11, "bold"), bg=CARD, fg=GREEN)
+        self.loop_label.pack(side="left", pady=8)
+
+        tk.Label(play_info, text="   Pause between loops (sec):",
+                 font=("Segoe UI", 9), bg=CARD, fg=MUTED).pack(side="left", pady=8)
+        self.delay_var = tk.DoubleVar(value=0.5)
+        tk.Spinbox(play_info, from_=0.0, to=60.0, increment=0.5,
+                   textvariable=self.delay_var, width=5,
+                   font=("Segoe UI", 10), bg=CARD2, fg=FG,
+                   buttonbackground=CARD, relief="flat").pack(side="left", padx=(6, 12), pady=8)
+
+        # ── Status bar ─────────────────────────────
+        self.status_bar = tk.Label(
+            self.root, text="⏹  Idle — press START RECORDING to begin",
+            font=("Segoe UI", 9, "bold"), bg=CARD2, fg=FG,
+            anchor="w", padx=12, pady=8
+        )
+        self.status_bar.pack(fill="x", padx=24, pady=(10, 0))
+
+        # ── Clear + hint ───────────────────────────
         self.btn_clear = tk.Button(
-            self.root, text="🗑  WYCZYŚĆ NAGRANIE", font=("Segoe UI", 10),
-            bg=CARD, fg=MUTED, activebackground="#45475a", activeforeground=FG,
-            relief="flat", bd=0, cursor="hand2", height=1,
+            self.root, text="🗑  Clear recording",
+            font=("Segoe UI", 9), bg=CARD, fg=MUTED,
+            activebackground=CARD2, activeforeground=FG,
+            relief="flat", bd=0, cursor="hand2",
             command=self._clear_recording
         )
-        self.btn_clear.pack(fill="x", padx=24, pady=(0, 14))
+        self.btn_clear.pack(pady=(8, 0))
 
-        # ── Opóźnienie między pętlami ──
-        delay_frame = tk.Frame(self.root, bg=CARD)
-        delay_frame.pack(fill="x", padx=24, pady=(0, 10))
-        tk.Label(delay_frame, text="Pauza między pętlami (sek):",
-                 font=("Segoe UI", 9), bg=CARD, fg=MUTED).pack(side="left", padx=(12, 8), pady=8)
-        self.delay_var = tk.DoubleVar(value=0.5)
-        tk.Spinbox(delay_frame, from_=0.0, to=60.0, increment=0.5,
-                   textvariable=self.delay_var, width=6,
-                   font=("Segoe UI", 10), bg="#45475a", fg=FG,
-                   buttonbackground=CARD, relief="flat").pack(side="left", pady=8)
+        tk.Label(self.root, text="ESC  →  stop recording / stop playback",
+                 font=("Segoe UI", 8), bg=BG, fg=MUTED).pack(pady=(6, 0))
 
-        # ── Podpowiedź ──
-        tk.Label(self.root,
-                 text="ESC  →  zatrzymaj nagrywanie / odtwarzanie",
-                 font=("Segoe UI", 8), bg=BG, fg=MUTED).pack(pady=(4, 0))
+    def _section(self, text):
+        """Section header label."""
+        tk.Label(self.root, text=text,
+                 font=("Segoe UI", 9, "bold"), bg=BG, fg=BLUE,
+                 anchor="w").pack(fill="x", padx=24, pady=(10, 2))
 
-    # ──────────────────────────────────────────────
-    # Globalny listener ESC
-    # ──────────────────────────────────────────────
+    def _card(self):
+        """Returns a dark card frame."""
+        f = tk.Frame(self.root, bg=CARD)
+        f.pack(fill="x", padx=24, pady=(0, 6))
+        return f
+
+    # ─────────────────────────────────────────────────
+    # Global ESC listener
+    # ─────────────────────────────────────────────────
     def _start_global_esc_listener(self):
         def on_press(key):
             if key == Key.esc:
@@ -169,12 +184,12 @@ class AutoKlik:
         elif self.playing:
             self.root.after(0, self._stop_playing)
 
-    # ──────────────────────────────────────────────
-    # NAGRYWANIE
-    # ──────────────────────────────────────────────
+    # ─────────────────────────────────────────────────
+    # RECORDING
+    # ─────────────────────────────────────────────────
     def _toggle_record(self):
         if self.playing:
-            messagebox.showwarning("AutoKlik", "Zatrzymaj odtwarzanie przed nagrywaniem!")
+            messagebox.showwarning("AutoKlik", "Stop playback before recording!")
             return
         if self.recording:
             self._stop_recording()
@@ -183,7 +198,7 @@ class AutoKlik:
 
     def _start_recording(self):
         if not self.record_mouse_var.get() and not self.record_keyboard_var.get():
-            messagebox.showwarning("AutoKlik", "Zaznacz co najmniej jedną opcję nagrywania!")
+            messagebox.showwarning("AutoKlik", "Select at least one option to record (Mouse / Keyboard)!")
             return
 
         self.events.clear()
@@ -191,7 +206,7 @@ class AutoKlik:
         self.last_event_time = time.time()
         self._update_ui()
 
-        # ── Listener myszy ──
+        # Mouse listener
         if self.record_mouse_var.get():
             def on_move(x, y):
                 if not self.recording:
@@ -212,17 +227,15 @@ class AutoKlik:
                 on_move=on_move, on_click=on_click, on_scroll=on_scroll, daemon=True)
             self.record_listener_mouse.start()
 
-        # ── Listener klawiatury ──
+        # Keyboard listener
         if self.record_keyboard_var.get():
             def on_key_press(key):
                 if not self.recording:
                     return False
                 if key == Key.esc:
-                    return  # ESC obsługuje globalny listener
+                    return  # handled by global listener
                 self._append_event("key_press", key)
-                # Pokaż ostatni klawisz w UI
-                self.root.after(0, lambda k=key: self.key_label.config(
-                    text=self._key_name(k)))
+                self.root.after(0, lambda k=key: self.key_label.config(text=self._key_name(k)))
 
             def on_key_release(key):
                 if not self.recording:
@@ -250,14 +263,15 @@ class AutoKlik:
         if self.record_listener_keyboard:
             self.record_listener_keyboard.stop()
             self.record_listener_keyboard = None
-        self._update_ui()
+        # Force UI refresh on main thread
+        self.root.after(0, self._update_ui)
 
-    # ──────────────────────────────────────────────
-    # ODTWARZANIE
-    # ──────────────────────────────────────────────
+    # ─────────────────────────────────────────────────
+    # PLAYBACK
+    # ─────────────────────────────────────────────────
     def _toggle_play(self):
         if self.recording:
-            messagebox.showwarning("AutoKlik", "Zatrzymaj nagrywanie przed odtwarzaniem!")
+            messagebox.showwarning("AutoKlik", "Stop recording before playing!")
             return
         if self.playing:
             self._stop_playing()
@@ -266,7 +280,7 @@ class AutoKlik:
 
     def _start_playing(self):
         if not self.events:
-            messagebox.showinfo("AutoKlik", "Brak nagrania! Najpierw nagraj akcje.")
+            messagebox.showinfo("AutoKlik", "No recording found!\nRecord actions first (Step 1).")
             return
         self.playing = True
         self.loop_count = 0
@@ -284,14 +298,11 @@ class AutoKlik:
                     break
                 etype, edata, delay = event
 
-                # Ogranicz delay (ruchy myszy max 2s, reszta max 5s)
                 cap = 2.0 if etype == "move" else 5.0
                 wait = min(delay, cap)
-                if wait > 0:
-                    # Przerywalne czekanie (sprawdzamy co 50ms)
-                    end = time.time() + wait
-                    while self.playing and time.time() < end:
-                        time.sleep(0.05)
+                end = time.time() + wait
+                while self.playing and time.time() < end:
+                    time.sleep(0.05)
 
                 if not self.playing:
                     break
@@ -312,7 +323,6 @@ class AutoKlik:
                         self.mouse_ctrl.scroll(dx, dy)
                     elif etype == "key_press":
                         self.kbd_ctrl.press(edata)
-                        # Pokaż klawisz w UI
                         self.root.after(0, lambda k=edata: self.key_label.config(
                             text=f"▶ {self._key_name(k)}"))
                     elif etype == "key_release":
@@ -320,7 +330,6 @@ class AutoKlik:
                 except Exception:
                     pass
 
-            # Pauza między pętlami (przerywalna)
             if self.playing:
                 pause = self.delay_var.get()
                 end = time.time() + pause
@@ -331,15 +340,14 @@ class AutoKlik:
 
     def _stop_playing(self):
         self.playing = False
-        # _update_ui wywoła się przez wątek gdy skończy
+        # _update_ui will be called by play thread when it exits
 
-    # ──────────────────────────────────────────────
-    # POMOCNICZE
-    # ──────────────────────────────────────────────
+    # ─────────────────────────────────────────────────
+    # HELPERS
+    # ─────────────────────────────────────────────────
     def _key_name(self, key):
-        """Zwraca czytelną nazwę klawisza."""
         try:
-            if hasattr(key, 'char') and key.char:
+            if hasattr(key, "char") and key.char:
                 return key.char
             return str(key).replace("Key.", "").upper()
         except Exception:
@@ -347,32 +355,69 @@ class AutoKlik:
 
     def _clear_recording(self):
         if self.recording or self.playing:
-            messagebox.showwarning("AutoKlik", "Zatrzymaj nagrywanie/odtwarzanie przed wyczyszczeniem!")
+            messagebox.showwarning("AutoKlik", "Stop recording/playback before clearing!")
             return
         self.events.clear()
         self.events_label.config(text="0")
         self.loop_label.config(text="0")
         self.key_label.config(text="—")
+        self._update_ui()
 
     def _update_ui(self):
-        RED    = "#f38ba8"
-        GREEN  = "#a6e3a1"
-        YELLOW = "#f9e2af"
-        FG     = "#cdd6f4"
+        count = len(self.events)
+        self.events_label.config(text=str(count))
 
         if self.recording:
-            self.status_label.config(text="⏺  Nagrywam... (ESC aby skończyć)", fg=RED)
-            self.btn_record.config(text="⏹  STOP NAGRYWANIA", bg=YELLOW, state="normal")
-            self.btn_play.config(state="disabled", bg="#45475a")
+            # RECORDING STATE
+            self.btn_record.config(
+                text="⏹  STOP RECORDING  (or press ESC)",
+                bg=YELLOW, fg="#11111b", state="normal"
+            )
+            self.btn_play.config(
+                text="▶  START PLAYBACK",
+                bg=CARD2, fg=MUTED, state="disabled"
+            )
+            self.status_bar.config(
+                text="⏺  Recording... press STOP or ESC when done", fg=RED
+            )
+
         elif self.playing:
-            self.status_label.config(text="▶  Odtwarzam... (ESC aby skończyć)", fg=GREEN)
-            self.btn_record.config(state="disabled", bg="#45475a")
-            self.btn_play.config(text="⏹  STOP", bg=YELLOW, state="normal")
+            # PLAYING STATE
+            self.btn_record.config(
+                text="⏺  START RECORDING",
+                bg=CARD2, fg=MUTED, state="disabled"
+            )
+            self.btn_play.config(
+                text="⏹  STOP PLAYBACK  (or press ESC)",
+                bg=YELLOW, fg="#11111b", state="normal"
+            )
+            self.status_bar.config(
+                text="▶  Playing back... press STOP or ESC to stop", fg=GREEN
+            )
+
         else:
-            self.status_label.config(text="⏹  Bezczynny", fg=FG)
-            self.btn_record.config(text="⏺  NAGRAJ", bg=RED, state="normal")
-            self.btn_play.config(text="▶  START", bg=GREEN, state="normal")
-        self.events_label.config(text=str(len(self.events)))
+            # IDLE STATE
+            self.btn_record.config(
+                text="⏺  START RECORDING",
+                bg=RED, fg="#11111b", state="normal"
+            )
+            if count > 0:
+                # Has recording — highlight play button
+                self.btn_play.config(
+                    text=f"▶  START PLAYBACK  ({count} actions recorded)",
+                    bg=GREEN, fg="#11111b", state="normal"
+                )
+                self.status_bar.config(
+                    text=f"✅  {count} actions ready — press START PLAYBACK!", fg=GREEN
+                )
+            else:
+                self.btn_play.config(
+                    text="▶  START PLAYBACK",
+                    bg=CARD2, fg=MUTED, state="disabled"
+                )
+                self.status_bar.config(
+                    text="⏹  Idle — press START RECORDING to begin", fg=FG
+                )
 
     def on_close(self):
         self.recording = False
@@ -386,9 +431,9 @@ class AutoKlik:
         self.root.destroy()
 
 
-# ──────────────────────────────────────────────
+# ─────────────────────────────────────────────────
 # MAIN
-# ──────────────────────────────────────────────
+# ─────────────────────────────────────────────────
 if __name__ == "__main__":
     root = tk.Tk()
     app = AutoKlik(root)
