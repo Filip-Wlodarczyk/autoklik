@@ -20,6 +20,8 @@ install: _deps _icon _desktop _bin
 	@echo "    (You may need to log out and back in for the menu entry to appear.)"
 
 _deps:
+	@echo "📦  Installing system dependencies..."
+	@sudo apt-get install -y xdotool -q 2>/dev/null || echo "    (xdotool install skipped — try: sudo apt install xdotool)"
 	@echo "📦  Installing Python dependencies..."
 	@pip3 install six python-xlib --break-system-packages -q 2>/dev/null || pip3 install six python-xlib -q
 	@pip3 install pynput --no-deps --break-system-packages -q 2>/dev/null || pip3 install pynput --no-deps -q
