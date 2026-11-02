@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=AutoKlik
+GenericName=Auto Clicker
+Comment=Nagrywa i powtarza ruchy myszy oraz klawiaturę
+Exec=python3 SRCDIR/autoklik.py
+Icon=autoklik
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=autoclicker;mouse;keyboard;macro;automation;
+StartupNotify=true
+StartupWMClass=AutoKlik
