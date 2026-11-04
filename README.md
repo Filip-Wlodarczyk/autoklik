@@ -46,7 +46,7 @@
 ### Option 1 — `make install` (recommended)
 
 ```bash
-git clone https://github.com/your-username/autoklik.git
+git clone https://github.com/Filip-Wlodarczyk/autoklik.git
 cd autoklik
 make install
 ```
@@ -58,7 +58,7 @@ Installs all dependencies, copies the `.desktop` entry and icon — the app appe
 ### Option 2 — Manual
 
 ```bash
-git clone https://github.com/your-username/autoklik.git
+git clone https://github.com/Filip-Wlodarczyk/autoklik.git
 cd autoklik
 
 # Install xdotool (required for playback)
